@@ -120,20 +120,23 @@ def beam_sample(net, sess, chars, vocab, max_length=200, prime='The ',
 def sanitize_text(vocab, text):
     return ''.join(i for i in text if i in vocab)
 
+def initial_state_with_relevance_masking(net, sess, relevance):
+    if relevance <= 0.: return initial_state(net, sess)
+    else: return [initial_state(net, sess), initial_state(net, sess)]
+
 def chatbot(net, sess, chars, vocab, max_length, beam_width, relevance, temperature):
-    if relevance < 0.:
-        states = initial_state(net, sess)
-    else:
-        states = [initial_state(net, sess), initial_state(net, sess)]
+    states = initial_state_with_relevance_masking(net, sess, relevance)
     while True:
         user_input = sanitize_text(vocab, raw_input('\n> '))
-        user_command_entered, relevance, temperature = process_user_command(
-            user_input, relevance, temperature)
+        user_command_entered, reset, states, relevance, temperature, beam_width = process_user_command(
+            user_input, states, relevance, temperature, beam_width)
+        if reset: states = initial_state_with_relevance_masking(net, sess, relevance)
         if user_command_entered: continue
         states = forward_text(net, sess, states, vocab, '> ' + user_input + "\n>")
-        computer_response_generator = beam_search_generator(sess, net, copy.deepcopy(states),
-            vocab[' '], vocab['\n'], beam_width, forward_with_mask,
-            (relevance, vocab['\n']), temperature)
+        computer_response_generator = beam_search_generator(sess=sess, net=net,
+            initial_state=copy.deepcopy(states), initial_sample=vocab[' '],
+            early_term_token=vocab['\n'], beam_width=beam_width, forward_model_fn=forward_with_mask,
+            forward_args=(relevance, vocab['\n']), temperature=temperature)
         for i, char_token in enumerate(computer_response_generator):
             print(chars[char_token], end='')
             states = forward_text(net, sess, states, vocab, chars[char_token])
@@ -141,20 +144,34 @@ def chatbot(net, sess, chars, vocab, max_length, beam_width, relevance, temperat
             if i >= max_length: break
         states = forward_text(net, sess, states, vocab, '\n> ')
 
-def process_user_command(user_input, relevance, temperature):
-    if user_input.startswith('--temperature '):
-        temperature = float(user_input[len('--temperature '):])
-        print("[Temperature set to {}]".format(temperature))
-        return True, relevance, temperature
-    elif user_input.startswith('--relevance '):
-        if relevance < 0:
-            print("[Relevance is disabled; restart program with relevance > 0 to enable.]")
-            return True, relevance, temperature
-        else:
-            relevance = float(user_input[len('--relevance '):])
-            print("[Relevance set to {}]".format(relevance))
-            return True, relevance, temperature
-    return False, relevance, temperature
+def process_user_command(user_input, states, relevance, temperature, beam_width):
+    user_command_entered = False
+    reset = False
+    try:
+        if user_input.startswith('--temperature '):
+            user_command_entered = True
+            temperature = max(0.001, float(user_input[len('--temperature '):]))
+            print("[Temperature set to {}]".format(temperature))
+        elif user_input.startswith('--relevance '):
+            user_command_entered = True
+            new_relevance = float(user_input[len('--relevance '):])
+            if relevance <= 0. and new_relevance > 0.:
+                states = [states, copy.deepcopy(states)]
+            elif relevance > 0. and new_relevance < 0.:
+                states = states[0]
+            relevance = new_relevance
+            print("[Relevance disabled]" if relevance < 0. else "[Relevance set to {}]".format(relevance))
+        elif user_input.startswith('--beam_width '):
+            user_command_entered = True
+            beam_width = max(1, int(user_input[len('--beam_width '):]))
+            print("[Beam width set to {}]".format(beam_width))
+        elif user_input.startswith('--reset'):
+            user_command_entered = True
+            reset = True
+            print("[Model state reset]")
+    except ValueError:
+        print("[Value error with provided argument.]")
+    return user_command_entered, reset, states, relevance, temperature, beam_width
 
 def consensus_length(beam_outputs, early_term_token):
     for l in xrange(len(beam_outputs[0])):

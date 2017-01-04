@@ -4,6 +4,10 @@ A toy chatbot powered by deep learning and trained on data from Reddit.
 Here is a sample chat transcript (not cherry-picked). Lines that start with ">" are me; the lines without ">" are the chatbot's responses.
 
 ```
+$ python chatbot.py
+Creating model...
+Restoring weights...
+
 > Hi, how are you?
  It's all good, I'm going to bed now but I'll see if I can get home tomorrow. I'll get back to you.
 > Don't go to bed just yet
@@ -45,6 +49,29 @@ Try playing around with the arguments to `chatbot.py` to obtain better samples:
 - **temperature**: At each step, the model ascribes a certain probability to each character. Temperature can adjust the probability distribution. 1.0 is neutral (and the default), lower values increase high probability values and decrease lower probability values to make the choices more conservative, and higher values will do the reverse. Values outside of the range of 0.5-1.5 are unlikely to give coherent results.
 
 - **relevance**: Two models are run in parallel: the primary model and the mask model. The mask model is scaled by the relevance value, and then the probabilities of the primary model are multiplied by the complement of the mask model before sampling. The state of the mask model is reset upon each newline character. The net effect is that the model is encouraged to choose a line of dialogue that is most relevant to the prior line of dialogue, even if a more generic response (e.g. "I don't know anything about that") may be more absolutely probable. Lower relevance values put more pressure on the model to produce relevant responses, at the cost of the coherence of the responses. Going much below 1.5 compromises the quality of the responses; 2-3 is the recommended range. Setting it to a negative value disables relevance, and this is the default, because I'm not confident that it qualitatively improves the outputs and it halves the speed of sampling.
+
+These values can also be manipulated during a chat, and the model state can be reset, without restarting the chatbot:
+
+```
+$ python chatbot.py
+Creating model...
+Restoring weights...
+
+> --temperature 1.3
+[Temperature set to 1.3]
+
+> --relevance 2 
+[Relevance set to 2.0]
+
+> --relevance -1
+[Relevance disabled]
+
+> --beam_width 5
+[Beam width set to 5]
+
+> --reset
+[Model state reset]
+```
 
 ### Get training data
 
