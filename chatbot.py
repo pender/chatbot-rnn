@@ -117,13 +117,16 @@ def beam_sample(net, sess, chars, vocab, max_length=200, prime='The ',
         if i >= max_length: break
     print()
 
+def sanitize_text(vocab, text):
+    return ''.join(i for i in text if i in vocab)
+
 def chatbot(net, sess, chars, vocab, max_length, beam_width, relevance, temperature):
     if relevance < 0.:
         states = initial_state(net, sess)
     else:
         states = [initial_state(net, sess), initial_state(net, sess)]
     while True:
-        user_input = raw_input('\n> ')
+        user_input = sanitize_text(vocab, raw_input('\n> '))
         user_command_entered, relevance, temperature = process_user_command(
             user_input, relevance, temperature)
         if user_command_entered: continue
