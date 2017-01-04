@@ -1,0 +1,29 @@
+{
+    "subreddit_whitelist": [], 
+    "subreddit_blacklist": [
+        "sports", 
+        "announcements", 
+        "blog", 
+        "gaming", 
+        "CasualPokemonTrades", 
+        "pokemontrades",
+        "YamakuHighSchool",
+        "XMenRP"
+    ], 
+    "substring_blacklist": [
+        "[", 
+        "http://", 
+        "https://", 
+        " r/",
+        " u/",
+        "/r/", 
+        "/u/", 
+        "reddit", 
+        "Reddit", 
+        "upvote", 
+        "downvote", 
+        "upvoting", 
+        "downvoting", 
+        "OOC:"
+    ]
+}
