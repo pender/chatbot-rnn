@@ -27,9 +27,9 @@ def main():
                        help='sampling temperature'
                        '(lower is more conservative, default is 1.0, which is neutral)')
     parser.add_argument('--relevance', type=float, default=-1.,
-                       help='amount of "relevance pressure (disabled by default):"'
-                       'lower is more pressure, 1.5 is probably as low as it can go without'
-                       'noticeably degrading coherence, 2.0 - 3.0 makes for better results;'
+                       help='amount of "relevance masking/MMI (disabled by default):"'
+                       'higher is more pressure, 0.4 is probably as high as it can go without'
+                       'noticeably degrading coherence;'
                        'set to <0 to disable relevance masking')
     args = parser.parse_args()
     sample_main(args)
@@ -157,7 +157,7 @@ def process_user_command(user_input, states, relevance, temperature, beam_width)
             new_relevance = float(user_input[len('--relevance '):])
             if relevance <= 0. and new_relevance > 0.:
                 states = [states, copy.deepcopy(states)]
-            elif relevance > 0. and new_relevance < 0.:
+            elif relevance > 0. and new_relevance <= 0.:
                 states = states[0]
             relevance = new_relevance
             print("[Relevance disabled]" if relevance < 0. else "[Relevance set to {}]".format(relevance))
@@ -187,19 +187,16 @@ def forward_with_mask(sess, net, states, input_sample, forward_args):
         prob, states = net.forward_model(sess, states, input_sample)
         return prob / sum(prob), states
     # states should be a 2-length list: [primary net state, mask net state].
-    # forward_args should be a 2-length list/tuple: [mask_temperature, mask_reset_token]
+    # forward_args should be a 2-length list/tuple: [relevance, mask_reset_token]
+    relevance, mask_reset_token = forward_args
+    if input_sample == mask_reset_token:
+        # Reset the mask probs when reaching mask_reset_token (newline).
+        states[1] = initial_state(net, sess)
     primary_prob, states[0] = net.forward_model(sess, states[0], input_sample)
     primary_prob /= sum(primary_prob)
-    if input_sample == forward_args[1]:
-        # Reset the mask probs when reaching mask_reset_token (newline).
-        combined_prob = primary_prob
-        states[1] = initial_state(net, sess)
-    else:
-        # Scale mask probs by temperature and then multiply its complement by primary probs.
-        mask_prob, states[1] = net.forward_model(sess, states[1], input_sample)
-        mask_prob = scale_prediction(mask_prob, forward_args[0])
-        mask_prob /= sum(mask_prob)
-        combined_prob = primary_prob * (-mask_prob + 1)
+    mask_prob, states[1] = net.forward_model(sess, states[1], input_sample)
+    mask_prob /= sum(mask_prob)
+    combined_prob = np.exp(np.log(primary_prob) - relevance * np.log(mask_prob))
     # Normalize probabilities so they sum to 1.
     return combined_prob / sum(combined_prob), states
 
