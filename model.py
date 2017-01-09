@@ -165,7 +165,7 @@ class Model():
         # It is a single-element floating point tensor. This is what the optimizer seeks to minimize.
         self.cost = tf.reduce_sum(loss) / args.batch_size / args.seq_length
         # Create a summary for our cost.
-        tf.scalar_summary("cost", self.cost)
+        tf.summary.scalar("cost", self.cost)
         # Create a node to track the learning rate as it decays through the epochs.
         self.lr = tf.Variable(args.learning_rate, trainable=False)
         self.global_epoch_fraction = tf.Variable(0.0, trainable=False)
@@ -180,7 +180,7 @@ class Model():
         # Training op nudges the variables along the gradient, with the given learning rate, using the ADAM optimizer.
         # This is the op that a training session should be instructed to perform.
         self.train_op = optimizer.apply_gradients(zip(grads, tvars))
-        self.summary_op = tf.merge_all_summaries()
+        self.summary_op = tf.summary.merge_all()
 
     def save_variables_list(self):
         # Return a list of the trainable variables created within the rnnlm model.
