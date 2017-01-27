@@ -24,13 +24,13 @@ class Model():
 
         # Call tensorflow library tensorflow-master/tensorflow/python/ops/rnn_cell
         # to create a layer of rnn_size cells of the specified basic type (RNN/GRU/LSTM).
-        cell = cell_fn(args.rnn_size)
+        cell = cell_fn(args.rnn_size, state_is_tuple=True)
 
         # Use the same rnn_cell library to create a stack of these cells
         # of num_layers layers. Pass in a python list of these cells.
         # (The [cell] * arg.num_layers syntax literally duplicates cell multiple times in
         # a list. The syntax is such that [5, 6] * 3 would return [5, 6, 5, 6, 5, 6].)
-        self.cell = cell = rnn_cell.MultiRNNCell([cell] * args.num_layers)
+        self.cell = cell = rnn_cell.MultiRNNCell([cell] * args.num_layers, state_is_tuple=True)
 
         # Create two TF placeholder nodes of 32-bit ints (NOT floats!),
         # each of shape batch_size x seq_length. This shape matches the batches
