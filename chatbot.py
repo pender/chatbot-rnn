@@ -67,7 +67,9 @@ def sample_main(args):
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     with tf.Session(config=config) as sess:
-        tf.initialize_all_variables().run()
+        # tf.initialize_all_variables().run()
+        tf.global_variables_initializer().run()
+        tf.local_variables_initializer().run()
         saver = tf.train.Saver(net.save_variables_list())
         # Restore the saved variables, replacing the initialized values.
         print("Restoring weights...")
