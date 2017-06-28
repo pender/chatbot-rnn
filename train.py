@@ -20,7 +20,7 @@ def main():
     parser.add_argument('--num_layers', type=int, default=4,
                        help='number of layers in the RNN')
     parser.add_argument('--model', type=str, default='gru',
-                       help='rnn, gru, or lstm')
+                       help='rnn, gru, lstm or nas')
     parser.add_argument('--batch_size', type=int, default=40,
                        help='minibatch size')
     parser.add_argument('--seq_length', type=int, default=50,
@@ -80,7 +80,9 @@ def train(args):
     config = tf.ConfigProto(log_device_placement=False)
     config.gpu_options.allow_growth = True
     with tf.Session(config=config) as sess:
-        tf.initialize_all_variables().run()
+        # tf.initialize_all_variables().run()
+        tf.global_variables_initializer().run()
+        tf.local_variables_initializer().run()
         saver = tf.train.Saver(model.save_variables_list())
         if (load_model):
             print("Loading saved parameters")
@@ -95,18 +97,19 @@ def train(args):
                 - int(global_epoch_fraction)) * data_loader.total_batch_count)
         epoch_range = (int(global_epoch_fraction),
                 args.num_epochs + int(global_epoch_fraction))
-        writer = tf.train.SummaryWriter(args.save_dir, graph=tf.get_default_graph())
+        # writer = tf.train.SummaryWriter(args.save_dir, graph=tf.get_default_graph())
+        writer = tf.summary.FileWriter(args.save_dir, graph=tf.get_default_graph())
         outputs = [model.cost, model.final_state, model.train_op, model.summary_op]
         is_lstm = args.model == 'lstm'
         global_step = epoch_range[0] * data_loader.total_batch_count + initial_batch_step
         try:
-            for e in xrange(*epoch_range):
+            for e in range(*epoch_range):
                 # e iterates through the training epochs.
                 # Reset the model state, so it does not carry over from the end of the previous epoch.
                 state = sess.run(model.initial_state)
                 batch_range = (initial_batch_step, data_loader.total_batch_count)
                 initial_batch_step = 0
-                for b in xrange(*batch_range):
+                for b in range(*batch_range):
                     global_step += 1
                     if global_step % args.decay_steps == 0:
                         # Set the model.lr element of the model to track
