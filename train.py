@@ -4,7 +4,7 @@ import tensorflow as tf
 import argparse
 import time
 import os
-import cPickle
+import _pickle as cPickle
 
 from utils import TextLoader
 from model import Model
