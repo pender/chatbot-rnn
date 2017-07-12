@@ -2,7 +2,7 @@ import codecs
 import os
 import io
 import collections
-import cPickle
+import _pickle as cPickle
 from bz2 import BZ2File
 import numpy as np
 
@@ -47,9 +47,9 @@ class TextLoader():
             print ("processed input text file: {} characters loaded".format(self.tensor.size))
         else:
             # If the vocab file and sizes file already exist, load them.
-            print "loading vocab file"
+            print ("loading vocab file")
             self._load_vocab(vocab_file)
-            print "loading sizes file"
+            print ("loading sizes file")
             with open(sizes_file, 'rb') as f:
                 self.tensor_sizes = cPickle.load(f)
         self.tensor_batch_counts = [n / (self.batch_size * self.seq_length) for n in self.tensor_sizes]

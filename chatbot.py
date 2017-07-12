@@ -5,7 +5,7 @@ import tensorflow as tf
 
 import argparse
 import os
-import cPickle
+import _pickle as cPickle
 import copy
 import sys
 import string
