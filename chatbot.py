@@ -5,10 +5,10 @@ import tensorflow as tf
 
 import argparse
 import os
-import cPickle
+import pickle
 import copy
 import sys
-import string
+import html
 
 from utils import TextLoader
 from model import Model
@@ -46,7 +46,7 @@ def get_paths(input_path):
         if checkpoint:
             model_path = checkpoint.model_checkpoint_path
         else:
-            raise ValueError('checkpoint not found in {}.'.format(save_dir))
+            raise ValueError('Checkpoint not found in {}.'.format(save_dir))
     else:
         raise ValueError('save_dir is not a valid path.')
     return model_path, os.path.join(save_dir, 'config.pkl'), os.path.join(save_dir, 'chars_vocab.pkl')
@@ -56,34 +56,35 @@ def sample_main(args):
     # Arguments passed to sample.py direct us to a saved model.
     # Load the separate arguments by which that model was previously trained.
     # That's saved_args. Use those to load the model.
-    with open(config_path) as f:
-        saved_args = cPickle.load(f)
+    with open(config_path, 'rb') as f:
+        saved_args = pickle.load(f)
     # Separately load chars and vocab from the save directory.
-    with open(vocab_path) as f:
-        chars, vocab = cPickle.load(f)
+    with open(vocab_path, 'rb') as f:
+        chars, vocab = pickle.load(f)
     # Create the model from the saved arguments, in inference mode.
     print("Creating model...")
+    saved_args.batch_size = args.beam_width
     net = Model(saved_args, True)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
+    # Make tensorflow less verbose; filter out info (1+) and warnings (2+) but not errors (3).
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
     with tf.Session(config=config) as sess:
-        tf.initialize_all_variables().run()
+        tf.global_variables_initializer().run()
         saver = tf.train.Saver(net.save_variables_list())
         # Restore the saved variables, replacing the initialized values.
         print("Restoring weights...")
         saver.restore(sess, model_path)
         chatbot(net, sess, chars, vocab, args.n, args.beam_width, args.relevance, args.temperature)
-        #beam_sample(net, sess, chars, vocab, args.n, args.prime,
-            #args.beam_width, args.relevance, args.temperature)
 
 def initial_state(net, sess):
     # Return freshly initialized model states.
-    return sess.run(net.cell.zero_state(1, tf.float32))
+    return sess.run(net.zero_state)
 
-def forward_text(net, sess, states, vocab, prime_text=None):
+def forward_text(net, sess, states, relevance, vocab, prime_text=None):
     if prime_text is not None:
         for char in prime_text:
-            if len(states) == 2:
+            if relevance > 0.:
                 # Automatically forward the primary net.
                 _, states[0] = net.forward_model(sess, states[0], vocab[char])
                 # If the token is newline, reset the mask net state; else, forward it.
@@ -104,45 +105,47 @@ def scale_prediction(prediction, temperature):
     np.seterr(divide='warn')
     return scaled_prediction
 
-def beam_sample(net, sess, chars, vocab, max_length=200, prime='The ',
-    beam_width = 2, relevance=3.0, temperature=1.0):
-    states = [initial_state(net, sess), initial_state(net, sess)]
-    states = forward_text(net, sess, states, vocab, prime)
-    computer_response_generator = beam_search_generator(sess, net, states, vocab[' '],
-        None, beam_width, forward_with_mask, (temperature, vocab['\n']))
-    for i, char_token in enumerate(computer_response_generator):
-        print(chars[char_token], end='')
-        states = forward_text(net, sess, states, vocab, chars[char_token])
-        sys.stdout.flush()
-        if i >= max_length: break
-    print()
-
-def sanitize_text(vocab, text):
+def sanitize_text(vocab, text): # Strip out characters that are not part of the net's vocab.
     return ''.join(i for i in text if i in vocab)
 
 def initial_state_with_relevance_masking(net, sess, relevance):
     if relevance <= 0.: return initial_state(net, sess)
     else: return [initial_state(net, sess), initial_state(net, sess)]
 
+def possibly_escaped_char(raw_chars):
+    if raw_chars[-1] == ';':
+        for i, c in enumerate(reversed(raw_chars[:-1])):
+            if c == ';' or i > 8:
+                return raw_chars[-1]
+            elif c == '&':
+                escape_seq = "".join(raw_chars[-(i + 2):])
+                new_seq = html.unescape(escape_seq)
+                backspace_seq = "".join(['\b'] * (len(escape_seq)-1))
+                diff_length = len(escape_seq) - len(new_seq) - 1
+                return backspace_seq + new_seq + "".join([' '] * diff_length) + "".join(['\b'] * diff_length)
+    return raw_chars[-1]
+
 def chatbot(net, sess, chars, vocab, max_length, beam_width, relevance, temperature):
     states = initial_state_with_relevance_masking(net, sess, relevance)
     while True:
-        user_input = sanitize_text(vocab, raw_input('\n> '))
+        user_input = input('\n> ')
         user_command_entered, reset, states, relevance, temperature, beam_width = process_user_command(
             user_input, states, relevance, temperature, beam_width)
         if reset: states = initial_state_with_relevance_masking(net, sess, relevance)
         if user_command_entered: continue
-        states = forward_text(net, sess, states, vocab, '> ' + user_input + "\n>")
+        states = forward_text(net, sess, states, relevance, vocab, sanitize_text(vocab, "> " + user_input + "\n>"))
         computer_response_generator = beam_search_generator(sess=sess, net=net,
             initial_state=copy.deepcopy(states), initial_sample=vocab[' '],
             early_term_token=vocab['\n'], beam_width=beam_width, forward_model_fn=forward_with_mask,
-            forward_args=(relevance, vocab['\n']), temperature=temperature)
+            forward_args={'relevance':relevance, 'mask_reset_token':vocab['\n'], 'forbidden_token':vocab['>']},
+            temperature=temperature)
+        out_chars = []
         for i, char_token in enumerate(computer_response_generator):
-            print(chars[char_token], end='')
-            states = forward_text(net, sess, states, vocab, chars[char_token])
-            sys.stdout.flush()
+            out_chars.append(chars[char_token])
+            print(possibly_escaped_char(out_chars), end='', flush=True)
+            states = forward_text(net, sess, states, relevance, vocab, chars[char_token])
             if i >= max_length: break
-        states = forward_text(net, sess, states, vocab, '\n> ')
+        states = forward_text(net, sess, states, relevance, vocab, sanitize_text(vocab, "\n> "))
 
 def process_user_command(user_input, states, relevance, temperature, beam_width):
     user_command_entered = False
@@ -160,7 +163,7 @@ def process_user_command(user_input, states, relevance, temperature, beam_width)
             elif relevance > 0. and new_relevance <= 0.:
                 states = states[0]
             relevance = new_relevance
-            print("[Relevance disabled]" if relevance < 0. else "[Relevance set to {}]".format(relevance))
+            print("[Relevance disabled]" if relevance <= 0. else "[Relevance set to {}]".format(relevance))
         elif user_input.startswith('--beam_width '):
             user_command_entered = True
             beam_width = max(1, int(user_input[len('--beam_width '):]))
@@ -174,7 +177,7 @@ def process_user_command(user_input, states, relevance, temperature, beam_width)
     return user_command_entered, reset, states, relevance, temperature, beam_width
 
 def consensus_length(beam_outputs, early_term_token):
-    for l in xrange(len(beam_outputs[0])):
+    for l in range(len(beam_outputs[0])):
         if l > 0 and beam_outputs[0][l-1] == early_term_token:
             return l-1, True
         for b in beam_outputs[1:]:
@@ -182,13 +185,16 @@ def consensus_length(beam_outputs, early_term_token):
     return l, False
 
 def forward_with_mask(sess, net, states, input_sample, forward_args):
-    if len(states) != 2:
+    # forward_args is a dictionary containing relevance, mask_reset_token, forbidden_token.
+    relevance = forward_args['relevance']
+    mask_reset_token = forward_args['mask_reset_token']
+    forbidden_token = forward_args['forbidden_token']
+    if relevance <= 0.:
         # No relevance masking.
         prob, states = net.forward_model(sess, states, input_sample)
+        prob[forbidden_token] = 0
         return prob / sum(prob), states
     # states should be a 2-length list: [primary net state, mask net state].
-    # forward_args should be a 2-length list/tuple: [relevance, mask_reset_token]
-    relevance, mask_reset_token = forward_args
     if input_sample == mask_reset_token:
         # Reset the mask probs when reaching mask_reset_token (newline).
         states[1] = initial_state(net, sess)

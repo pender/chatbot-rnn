@@ -1,5 +1,4 @@
-from __future__ import print_function
-from bz2 import BZ2File
+import bz2
 import argparse
 import os
 import json
@@ -14,7 +13,7 @@ def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--input_file', type=str, default='reddit_data',
 					   help='data file or directory containing bz2 archive of json reddit data')
-	parser.add_argument('--logdir', type=str, default='standard',
+	parser.add_argument('--logdir', type=str, default='output/',
 					   help='directory to save the output and report')
 	parser.add_argument('--config_file', type=str, default='parser_config_standard.json',
 					   help='json parameters for parsing')
@@ -22,18 +21,39 @@ def main():
 					   help='max number of comments to cache in memory before flushing')
 	parser.add_argument('--output_file_size', type=int, default=2e8,
 					   help='max number of comments to cache in memory before flushing')
-	parser.add_argument('--print_every', type=int, default=100,
+	parser.add_argument('--print_every', type=int, default=1000,
 					   help='print an update to the screen this often')
+	parser.add_argument('--min_conversation_length', type=int, default=5,
+					   help='conversations must have at least this many comments for inclusion')
+	parser.add_argument('--print_subreddit', type=str2bool, nargs='?',
+                       const=False, default=False,
+					   help='set to true to print the name of the subreddit before each conversation'
+					   + ' to facilitate more convenient blacklisting in the config json file.'
+					   + ' (Remember to disable before constructing training data.)')
 	args = parser.parse_args()
 	parse_main(args)
 
+def str2bool(v):
+    if v.lower() in ('yes', 'true', 't', 'y', '1'): return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'): return False
+    else: raise argparse.ArgumentTypeError('Boolean value expected.')
+
 class RedditComment(object):
-	def __init__(self, json_object):
+	def __init__(self, json_object, record_subreddit=False):
 		self.body = json_object['body']
-		self.score = json_object['ups'] - json_object['downs']
+		if 'score' in json_object:
+			self.score = json_object['score']
+		elif 'ups' in json_object and 'down' in json_object:
+			self.score = json_object['ups'] - json_object['downs']
+		else: raise ValueError("Reddit comment did not include a score attribute. "
+			+ "Comment was as follows: " + json_object)
 		self.author = json_object['author']
-		self.parent_id = json_object['parent_id']
+		parent_id = json_object['parent_id']
+		# t1_ prefixes indicate comments. t3_ prefix would indicate a link submission.
+		if parent_id.startswith('t1_'): self.parent_id = parent_id
+		else: self.parent_id = None
 		self.child_id = None
+		if record_subreddit: self.subreddit = json_object['subreddit']
 
 def parse_main(args):
 	if not os.path.isfile(args.config_file):
@@ -52,36 +72,38 @@ def parse_main(args):
 		print("File already exists at output directory location: {}".format(args.logdir))
 		return
 	if not os.path.exists(args.logdir):
-		os.mkdir(args.logdir)
+		os.makedirs(args.logdir)
 	subreddit_dict = {}
 	comment_dict = {}
 	cache_count = 0
 	raw_data = raw_data_generator(args.input_file)
 	output_handler = OutputHandler(os.path.join(args.logdir, OUTPUT_FILE), args.output_file_size)
 	for i, line in enumerate(raw_data):
+		# Ignore certain kinds of malformed JSON
 		if len(line) > 1 and (line[-1] == '}' or line[-2] == '}'):
 			comment = json.loads(line)
-			if post_qualifies(comment, subreddit_blacklist,
+			if post_qualifies(comment, subreddit_blacklist, # Also preprocesses the post.
 				subreddit_whitelist, substring_blacklist):
 				sub = comment['subreddit']
 				if sub in subreddit_dict:
 					subreddit_dict[sub] += 1
 				else: subreddit_dict[sub] = 1
-				comment_dict[comment['name']] = RedditComment(comment)
+				comment_dict[comment['id']] = RedditComment(comment, args.print_subreddit)
 				cache_count += 1
 				if cache_count % args.print_every == 0:
-					print("\rCached {} comments".format(cache_count), end='')
+					print("\rCached {:,d} comments".format(cache_count), end='')
 					sys.stdout.flush()
 				if cache_count > args.comment_cache_size:
 					print()
 					process_comment_cache(comment_dict, args.print_every)
-					write_comment_cache(comment_dict, output_handler, args.print_every)
+					write_comment_cache(comment_dict, output_handler, args.print_every,
+										args.print_subreddit, args.min_conversation_length)
 					write_report(os.path.join(args.logdir, REPORT_FILE), subreddit_dict)
 					comment_dict.clear()
 					cache_count = 0
-	print("\nRead all {} lines from {}.".format(i, args.input_file))
+	print("\nRead all {:,d} lines from {}.".format(i, args.input_file))
 	process_comment_cache(comment_dict, args.print_every)
-	write_comment_cache(comment_dict, output_handler, args.print_every)
+	write_comment_cache(comment_dict, output_handler, args.print_every, args.print_subreddit)
 	write_report(os.path.join(args.logdir, REPORT_FILE), subreddit_dict)
 
 def raw_data_generator(path):
@@ -91,7 +113,7 @@ def raw_data_generator(path):
 				file_path = os.path.join(walk_root, file_name)
 				if file_path.endswith(FILE_SUFFIX):
 					print("\nReading from {}".format(file_path))
-					with BZ2File(file_path, "r") as raw_data:
+					with bz2.open(file_path, "rt") as raw_data:
 						try:
 							for line in raw_data: yield line
 						except IOError:
@@ -100,7 +122,7 @@ def raw_data_generator(path):
 				else: print("Skipping file {} (doesn't end with {})".format(file_path, FILE_SUFFIX))
 	elif os.path.isfile(path):
 		print("Reading from {}".format(path))
-		with BZ2File(path, "r") as raw_data:
+		with bz2.open(path, "rt") as raw_data:
 			for line in raw_data: yield line
 
 class OutputHandler():
@@ -128,11 +150,11 @@ class OutputHandler():
 			i += 1
 		self.current_path = path
 		self.current_file_size = 0
-		self.file_reference = BZ2File(self.current_path, "w")
+		self.file_reference = bz2.open(self.current_path, mode="wt")
 
 def post_qualifies(json_object, subreddit_blacklist,
 		subreddit_whitelist, substring_blacklist):
-	body = json_object['body'].encode('ascii', 'ignore').strip()
+	body = json_object['body']
 	post_length = len(body)
 	if post_length < 4 or post_length > 200: return False
 	subreddit = json_object['subreddit']
@@ -149,8 +171,11 @@ def post_qualifies(json_object, subreddit_blacklist,
 	body = re.sub('&gt;', '>', body) # Replace '&gt;' with '>'
 	body = re.sub('&amp;', '&', body) # Replace '&amp;' with '&'
 	post_length = len(body)
+	# Check the length again, now that we've preprocessed it.
 	if post_length < 4 or post_length > 200: return False
 	json_object['body'] = body # Save our changes
+	# Make sure the ID has the 't1_' prefix because that is how child comments refer to their parents.
+	if not json_object['id'].startswith('t1_'): json_object['id'] = 't1_' + json_object['id']
 	return True
 
 def process_comment_cache(comment_dict, print_every):
@@ -158,7 +183,7 @@ def process_comment_cache(comment_dict, print_every):
 	for my_id, my_comment in comment_dict.items():
 		i += 1
 		if i % print_every == 0:
-			print("\rProcessed {} comments".format(i), end='')
+			print("\rProcessed {:,d} comments".format(i), end='')
 			sys.stdout.flush()
 		if my_comment.parent_id is not None: # If we're not a top-level post...
 			if my_comment.parent_id in comment_dict: # ...and the parent is in our data set...
@@ -185,14 +210,16 @@ def process_comment_cache(comment_dict, print_every):
 				my_comment.parent_id = None
 	print()
 
-def write_comment_cache(comment_dict, output_file, print_every):
+def write_comment_cache(comment_dict, output_file, print_every,
+			record_subreddit=False, min_conversation_length=5):
 	i = 0
 	prev_print_count = 0
 	for k, v in comment_dict.items():
 		if v.parent_id is None and v.child_id is not None:
 			comment = v
 			depth = 0
-			output_string = ""
+			if record_subreddit: output_string = "/r/" + comment.subreddit + '\n'
+			else: output_string = ""
 			while comment is not None:
 				depth += 1
 				output_string += '> ' + comment.body + '\n'
@@ -200,12 +227,12 @@ def write_comment_cache(comment_dict, output_file, print_every):
 					comment = comment_dict[comment.child_id]
 				else:
 					comment = None
-					if depth > 3:
+					if depth >= min_conversation_length:
 						output_file.write(output_string + '\n')
 						i += depth
 						if i > prev_print_count + print_every:
 							prev_print_count = i
-							print("\rWrote {} comments".format(i), end='')
+							print("\rWrote {:,d} comments".format(i), end='')
 							sys.stdout.flush()
 	print()
 

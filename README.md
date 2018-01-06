@@ -1,46 +1,52 @@
 # chatbot-rnn
-A toy chatbot powered by deep learning and trained on data from Reddit.
+A toy chatbot powered by deep learning and trained on data from Reddit. Built on TensorFlow v1.4.0 and Python v3.5.1.
 
 Here is a sample chat transcript (not cherry-picked). Lines that start with ">" are me; the lines without ">" are the chatbot's responses.
 
 ```
-$ python chatbot.py
+$ python3 chatbot.py
 Creating model...
 Restoring weights...
 
 > Hi, how are you?
- It's all good, I'm going to bed now but I'll see if I can get home tomorrow. I'll get back to you.
-> Don't go to bed just yet
- That's great, what do you think of me?
-> I think you're a pretty interesting conversationalist
- Thank you, I appreciate it.
-> No problem. What do you think of me?
- Well, you know, that's fine. I don't think I could get behind any of them.
-> I see. Is anyone asking you to get behind them?  
- Of course not. I don't want to make myself look bad.
-> Yeah, I understand. So what's new?
- Anything that isn't childish and ignorant of yourself.
-> Do you think I'm childish and ignorant?
- Yes. Yes you are.
-> Why would you say that?
- I don't think you know what you are talking about.
-> But we've only just started talking!
- Yeah.. I guess I shouldn't have gotten over it...
-> It's all right.
- That's not what I meant.
+ I'm not the only one here that's having fun with you, it's all me.
+> Who else is with you?
+ Haha. I'm not the one who made the comment. I'm the one who said that and didn't think that much of anything. 
+> Oh, I see. So what's new?
+ Nothing. I just thought it was a bit of an overreaction. It's been a while since I've read it. 
+> It's all good
+ It's all good. It's one of those things that makes me smile :)
+> That's great. This is actually my demo chat, so it's nice that you're keeping things positive!
+ Thank you :) 
+> You're welcome! It's a nice change from the way that you sometimes are...
+ *blushes* Sorry, I should have clarified that I wasn't clear. I apologize for my ignorance.
+> Sooo, where are you from?             
+ I am from South America. Where you from?
+> California. Do you like it in South America?
+ I live in Australia, but south of Florida is one of the reasons I live in Florida. I've never been there, but I've never been there. 
+> I see, a true citizen of the world
+ Nope, I've never heard of it. I just spent a lot of time there. 
+> Spend a lot of time where?
+ I've never been there before, but I've heard it's about an hour and a half away. Maybe there's some sort of party called "Southern" but that's about it. 
+> Maybe there is, that's a great observation.
+ Not to mention it's all about being from another country.
+> All right, guess I should wrap this up, nice talking with you
+ I'm not going to argue with you. You're doing it wrong.
+> Some might call that arguing. Any final words?
+ Don't do that. I don't need to. 
  ```
 
 ## Get Started
 
-- Clone this project to your computer.
+- **Install [Tensorflow](http://www.tensorflow.org/)** for Python 3. To run a pretrained model, the CPU-only installation should suffice. If you want to train your own models, you'll need the GPU installation of Tensorflow (and a powerful CUDA-compatible GPU).
 
-- **Install [Tensorflow](http://www.tensorflow.org/)**. To run a pretrained model, the CPU-only installation should suffice. If you want to train your own models, you'll need the GPU installation of Tensorflow (and a powerful CUDA-compatible GPU).
+- Clone this project to your computer.
 
 ### Run my pre-trained model
 
-- **Download [my pre-trained model](https://drive.google.com/uc?export=download&id=0B6noVJLTV1jCT29uMzliMVVRWWM)** (201 MB). The zip file extracts into a folder named "reddit". Place that folder into the "models" directory of this project.
+- **Download [my pre-trained model](https://drive.google.com/uc?id=1rRRY-y1KdVk4UB5qhu7BjQHtfadIOmMk&export=download)** (2.3 GB). The zip file extracts into a folder named "reddit". Place that folder into the "models" directory of this project.
 
-- **Run the chatbot**. Open a terminal session and run `python chatbot.py`. Warning: this pre-trained model was trained on a diverse set of frequently off-color Reddit comments. It can (and eventually will) say things that are offensive, disturbing, bizarre or sexually explicit. It may insult minorities, it may call you names, it may accuse you of being a pedophile, it may try to seduce you. Please don't use the chatbot if these possibilities would distress you!
+- **Run the chatbot**. Open a terminal session and run `python3 chatbot.py`. Warning: this pre-trained model was trained on a diverse set of frequently off-color Reddit comments. It can (and eventually will) say things that are offensive, disturbing, bizarre or sexually explicit. It may insult minorities, it may call you names, it may accuse you of being a pedophile, it may try to seduce you. Please don't use the chatbot if these possibilities would distress you!
 
 Try playing around with the arguments to `chatbot.py` to obtain better samples:
 
@@ -53,7 +59,7 @@ Try playing around with the arguments to `chatbot.py` to obtain better samples:
 These values can also be manipulated during a chat, and the model state can be reset, without restarting the chatbot:
 
 ```
-$ python chatbot.py
+$ python3 chatbot.py
 Creating model...
 Restoring weights...
 
@@ -83,21 +89,19 @@ If you'd like to train your own model, you'll need training data. There are a fe
 
 - **Use Reddit data.** This is what the pre-trained model was trained on:
 
-  First, download a torrent of Reddit comments from a torrent link [listed here](https://www.reddit.com/r/datasets/comments/3bxlg7/i_have_every_publicly_available_reddit_comment/). You can use the single month of comments (~5 GB compressed), or you can download the entire archive (~160 GB compressed). Do not extract the individual bzip2 (.bz2) files contained in these archives.
+  First, download a torrent of Reddit comments from the torrent links [listed here](https://www.reddit.com/r/datasets/comments/65o7py/updated_reddit_comment_dataset_as_torrents/). The comments are available in annual archives, and you can download any or all of them (~304 GB compressed in total). Do not extract the individual bzip2 (.bz2) files contained in these archives.
 
-  Once you have your raw reddit data, place it in the `reddit-parse/reddit_data` subdirectory and use the `reddit-parse.py` script included in the project file to convert them into compressed text files of appropriately formatted conversations. This script chooses qualifying comments (must be under 200 characters, can't contain certain substrings such as 'http://', can't have been posted on certain subreddits) and assembles them into conversations of at least four lines. Coming up with good rules to curate conversations from raw reddit data is more art than science. I encourage you to play around with the parameters in the included `parser_config_standard.json` file, or to mess around with the parsing script itself, to come up with an interesting data set.
+  Once you have your raw reddit data, place it in the `reddit-parse/reddit_data` subdirectory and use the `reddit-parse.py` script included in the project file to convert them into compressed text files of appropriately formatted conversations. This script chooses qualifying comments (must be under 200 characters, can't contain certain substrings such as 'http://', can't have been posted on certain subreddits) and assembles them into conversations of at least five lines. Coming up with good rules to curate conversations from raw reddit data is more art than science. I encourage you to play around with the parameters in the included `parser_config_standard.json` file, or to mess around with the parsing script itself, to come up with an interesting data set.
 
-  Please be aware that there is a *lot* of Reddit data included in the torrents. It is very easy to run out of memory or hard drive space. I used the entire archive (~160 GB compressed, although some files appear to be corrupted and are skipped by `reddit-parse.py`), and ran the `reddit-parse.py` script with the configuration I included as the default, which holds a million comments (several GB) in memory at a time, takes about 12 hours to run on the entire archive, and produces 2.2 GB of bzip2-compressed output. When training the model, this raw data will be converted into numpy tensors, compressed, and saved back to disk, which consumes another ~5 GB of hard drive space. I acknowledge that this may be overkill relative to the size of the model.
+  Please be aware that there is a *lot* of Reddit data included in the torrents. It is very easy to run out of memory or hard drive space. I used the entire archive (~304 GB compressed, although some files appear to be corrupted and are skipped by `reddit-parse.py`), and ran the `reddit-parse.py` script with the configuration I included as the default, which holds a million comments (several GB) in memory at a time, takes about a day hours to run on the entire archive, and produces 2.1 GB of bzip2-compressed output. When training the model, this raw data will be converted into numpy tensors, compressed, and saved back to disk, which consumes another ~5 GB of hard drive space. I acknowledge that this may be overkill relative to the size of the model.
 
 Once you have training data in hand (and located in a subdirectory of the `data` directory):
 
 ### Train your own model
 
-- **Train.** Use `train.py` to train the model. The default hyperparameters (four layers of 1500 GRUs per layer) are the best that I've found, and are what I used to train the pre-trained model for about 37 days. These hyperparameters will just about fill the memory of a Titan X GPU, so if you have a smaller GPU, you will need to adjust them accordingly -- most straightforwardly, by reducing the batch size.
+- **Train.** Use `train.py` to train the model. The default hyperparameters are the best that I've found, and are what I used to train the pre-trained model for a couple of months. These hyperparameters will just about fill the memory of a GTX 1080 Ti GPU (11 GB of VRAM), so if you have a smaller GPU, you will need to adjust them accordingly (for example, set --num_blocks to 2).
 
   Training can be interrupted with crtl-c at any time, and will immediately save the model when interrupted. Training can be resumed on a saved model and will automatically carry on from where it was interrupted.
-
-  ![Alt text](/img/chatbot-training.png?raw=true)
 
 ## Thanks
 

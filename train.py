@@ -2,9 +2,9 @@ import numpy as np
 import tensorflow as tf
 
 import argparse
-import time
+import time, datetime
 import os
-import cPickle
+import pickle
 
 from utils import TextLoader
 from model import Model
@@ -15,28 +15,32 @@ def main():
                        help='data directory containing input.txt')
     parser.add_argument('--save_dir', type=str, default='models/new_save',
                        help='directory for checkpointed models (load from here if one is already present)')
-    parser.add_argument('--rnn_size', type=int, default=1500,
-                       help='size of RNN hidden state')
-    parser.add_argument('--num_layers', type=int, default=4,
-                       help='number of layers in the RNN')
+    parser.add_argument('--block_size', type=int, default=2048,
+                       help='number of cells per block')
+    parser.add_argument('--num_blocks', type=int, default=3,
+                       help='number of blocks per layer')
+    parser.add_argument('--num_layers', type=int, default=3,
+                       help='number of layers')
     parser.add_argument('--model', type=str, default='gru',
-                       help='rnn, gru, or lstm')
+                       help='rnn, gru, lstm or nas')
     parser.add_argument('--batch_size', type=int, default=40,
                        help='minibatch size')
-    parser.add_argument('--seq_length', type=int, default=50,
+    parser.add_argument('--seq_length', type=int, default=40,
                        help='RNN sequence length')
     parser.add_argument('--num_epochs', type=int, default=50,
                        help='number of epochs')
-    parser.add_argument('--save_every', type=int, default=1000,
+    parser.add_argument('--save_every', type=int, default=5000,
                        help='save frequency')
     parser.add_argument('--grad_clip', type=float, default=5.,
                        help='clip gradients at this value')
-    parser.add_argument('--learning_rate', type=float, default=6e-5,
+    parser.add_argument('--learning_rate', type=float, default=1e-5,
                        help='learning rate')
-    parser.add_argument('--decay_rate', type=float, default=0.95,
+    parser.add_argument('--decay_rate', type=float, default=0.975,
                        help='how much to decay the learning rate')
     parser.add_argument('--decay_steps', type=int, default=100000,
                        help='how often to decay the learning rate')
+    parser.add_argument('--set_learning_rate', type=float, default=-1,
+                       help='reset learning rate to this value (if greater than zero)')
     args = parser.parse_args()
     train(args)
 
@@ -55,33 +59,38 @@ def train(args):
         # Trained model already exists
         ckpt = tf.train.get_checkpoint_state(args.save_dir)
         if ckpt and ckpt.model_checkpoint_path:
-            with open(os.path.join(args.save_dir, 'config.pkl')) as f:
-                saved_args = cPickle.load(f)
-                args.rnn_size = saved_args.rnn_size
+            with open(os.path.join(args.save_dir, 'config.pkl'), 'rb') as f:
+                saved_args = pickle.load(f)
+                args.block_size = saved_args.block_size
+                args.num_blocks = saved_args.num_blocks
                 args.num_layers = saved_args.num_layers
                 args.model = saved_args.model
                 print("Found a previous checkpoint. Overwriting model description arguments to:")
-                print(" model: {}, rnn_size: {}, num_layers: {}".format(
-                    saved_args.model, saved_args.rnn_size, saved_args.num_layers))
+                print(" model: {}, block_size: {}, num_blocks: {}, num_layers: {}".format(
+                    saved_args.model, saved_args.block_size, saved_args.num_blocks, saved_args.num_layers))
                 load_model = True
 
     # Save all arguments to config.pkl in the save directory -- NOT the data directory.
-    with open(os.path.join(args.save_dir, 'config.pkl'), 'w') as f:
-        cPickle.dump(args, f)
+    with open(os.path.join(args.save_dir, 'config.pkl'), 'wb') as f:
+        pickle.dump(args, f)
     # Save a tuple of the characters list and the vocab dictionary to chars_vocab.pkl in
     # the save directory -- NOT the data directory.
-    with open(os.path.join(args.save_dir, 'chars_vocab.pkl'), 'w') as f:
-        cPickle.dump((data_loader.chars, data_loader.vocab), f)
+    with open(os.path.join(args.save_dir, 'chars_vocab.pkl'), 'wb') as f:
+        pickle.dump((data_loader.chars, data_loader.vocab), f)
 
     # Create the model!
     print("Building the model")
     model = Model(args)
+    print("Total trainable parameters: {:,d}".format(model.trainable_parameter_count()))
+    
+    # Make tensorflow less verbose; filter out info (1+) and warnings (2+) but not errors (3).
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     config = tf.ConfigProto(log_device_placement=False)
-    config.gpu_options.allow_growth = True
+    #config.gpu_options.allow_growth = True
     with tf.Session(config=config) as sess:
-        tf.initialize_all_variables().run()
-        saver = tf.train.Saver(model.save_variables_list())
+        tf.global_variables_initializer().run()
+        saver = tf.train.Saver(model.save_variables_list(), max_to_keep=3)
         if (load_model):
             print("Loading saved parameters")
             saver.restore(sess, ckpt.model_checkpoint_path)
@@ -89,24 +98,30 @@ def train(args):
         global_seconds_elapsed = sess.run(model.global_seconds_elapsed)
         if load_model: print("Resuming from global epoch fraction {:.3f},"
                 " total trained time: {}, learning rate: {}".format(
-                global_epoch_fraction, global_seconds_elapsed, sess.run(model.lr)))
+                global_epoch_fraction,
+                datetime.timedelta(seconds=float(global_seconds_elapsed)),
+                sess.run(model.lr)))
+        if (args.set_learning_rate > 0):
+            sess.run(tf.assign(model.lr, args.set_learning_rate))
+            print("Reset learning rate to {}".format(args.set_learning_rate))
         data_loader.cue_batch_pointer_to_epoch_fraction(global_epoch_fraction)
         initial_batch_step = int((global_epoch_fraction
                 - int(global_epoch_fraction)) * data_loader.total_batch_count)
         epoch_range = (int(global_epoch_fraction),
                 args.num_epochs + int(global_epoch_fraction))
-        writer = tf.train.SummaryWriter(args.save_dir, graph=tf.get_default_graph())
+        writer = tf.summary.FileWriter(args.save_dir, graph=tf.get_default_graph())
         outputs = [model.cost, model.final_state, model.train_op, model.summary_op]
-        is_lstm = args.model == 'lstm'
         global_step = epoch_range[0] * data_loader.total_batch_count + initial_batch_step
+        avg_loss = 0
+        avg_steps = 0
         try:
-            for e in xrange(*epoch_range):
+            for e in range(*epoch_range):
                 # e iterates through the training epochs.
                 # Reset the model state, so it does not carry over from the end of the previous epoch.
-                state = sess.run(model.initial_state)
+                state = sess.run(model.zero_state)
                 batch_range = (initial_batch_step, data_loader.total_batch_count)
                 initial_batch_step = 0
-                for b in xrange(*batch_range):
+                for b in range(*batch_range):
                     global_step += 1
                     if global_step % args.decay_steps == 0:
                         # Set the model.lr element of the model to track
@@ -124,13 +139,8 @@ def train(args):
                     # and initialize the model state to the final state from the previous batch, so that
                     # model state is accumulated and carried over between batches.
                     feed = {model.input_data: x, model.targets: y}
-                    if is_lstm:
-                        for i, (c, h) in enumerate(model.initial_state):
-                            feed[c] = state[i].c
-                            feed[h] = state[i].h
-                    else:
-                        for i, c in enumerate(model.initial_state):
-                            feed[c] = state[i]
+                    model.add_state_to_feed_dict(feed, state)
+                    
                     # Run the session! Specifically, tell TensorFlow to compute the graph to calculate
                     # the values of cost, final state, and the training op.
                     # Cost is used to monitor progress.
@@ -141,8 +151,11 @@ def train(args):
                     elapsed = time.time() - start
                     global_seconds_elapsed += elapsed
                     writer.add_summary(summary, e * batch_range[1] + b + 1)
-                    print "{}/{} (epoch {}/{}), loss = {:.3f}, time/batch = {:.3f}s" \
-                        .format(b, batch_range[1], e, epoch_range[1], train_loss, elapsed)
+                    if avg_steps < 100: avg_steps += 1
+                    avg_loss = 1 / avg_steps * train_loss + (1 - 1 / avg_steps) * avg_loss
+                    print("{:,d} / {:,d} (epoch {:.3f} / {}), loss {:.3f} (avg {:.3f}), {:.3f}s" \
+                        .format(b, batch_range[1], e + b / batch_range[1], epoch_range[1],
+                            train_loss, avg_loss, elapsed))
                     # Every save_every batches, save the model to disk.
                     # By default, only the five most recent checkpoint files are kept.
                     if (e * batch_range[1] + b + 1) % args.save_every == 0 \
@@ -162,11 +175,12 @@ def train(args):
 def save_model(sess, saver, model, save_dir, global_step, steps_per_epoch, global_seconds_elapsed):
     global_epoch_fraction = float(global_step) / float(steps_per_epoch)
     checkpoint_path = os.path.join(save_dir, 'model.ckpt')
-    print "Saving model to {} (epoch fraction {:.3f})".format(checkpoint_path, global_epoch_fraction)
+    print("Saving model to {} (epoch fraction {:.3f})...".format(checkpoint_path, global_epoch_fraction),
+        end='', flush=True)
     sess.run(tf.assign(model.global_epoch_fraction, global_epoch_fraction))
     sess.run(tf.assign(model.global_seconds_elapsed, global_seconds_elapsed))
     saver.save(sess, checkpoint_path, global_step = global_step)
-    print "Model saved."
+    print("\rSaved model to {} (epoch fraction {:.3f}).   ".format(checkpoint_path, global_epoch_fraction))
 
 if __name__ == '__main__':
     main()
