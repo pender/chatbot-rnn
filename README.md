@@ -54,6 +54,8 @@ Try playing around with the arguments to `chatbot.py` to obtain better samples:
 
 - **temperature**: At each step, the model ascribes a certain probability to each character. Temperature can adjust the probability distribution. 1.0 is neutral (and the default), lower values increase high probability values and decrease lower probability values to make the choices more conservative, and higher values will do the reverse. Values outside of the range of 0.5-1.5 are unlikely to give coherent results.
 
+- **top-n**: At each step, zero out the probability of all possible characters except the *n* most likely. Disabled by default.
+
 - **relevance**: Two models are run in parallel: the primary model and the mask model. The mask model is scaled by the relevance value, and then the probabilities of the primary model are combined according to equation 9 in [Li, Jiwei, et al. "A diversity-promoting objective function for neural conversation models." arXiv preprint arXiv:1510.03055 (2015)](https://arxiv.org/abs/1510.03055). The state of the mask model is reset upon each newline character. The net effect is that the model is encouraged to choose a line of dialogue that is most relevant to the prior line of dialogue, even if a more generic response (e.g. "I don't know anything about that") may be more absolutely probable. Higher relevance values put more pressure on the model to produce relevant responses, at the cost of the coherence of the responses. Going much above 0.4 compromises the quality of the responses. Setting it to a negative value disables relevance, and this is the default, because I'm not confident that it qualitatively improves the outputs and it halves the speed of sampling.
 
 These values can also be manipulated during a chat, and the model state can be reset, without restarting the chatbot:
@@ -71,6 +73,12 @@ Restoring weights...
 
 > --relevance -1
 [Relevance disabled]
+
+> --topn 2
+[Top-n filtering set to 2]
+
+> --topn -1
+[Top-n filtering disabled]
 
 > --beam_width 5
 [Beam width set to 5]

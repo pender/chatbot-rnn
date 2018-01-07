@@ -26,6 +26,9 @@ def main():
     parser.add_argument('--temperature', type=float, default=1.0,
                        help='sampling temperature'
                        '(lower is more conservative, default is 1.0, which is neutral)')
+    parser.add_argument('--topn', type=int, default=-1,
+                        help='at each step, choose from only this many most likely characters;'
+                        'set to <0 to disable top-n filtering.')
     parser.add_argument('--relevance', type=float, default=-1.,
                        help='amount of "relevance masking/MMI (disabled by default):"'
                        'higher is more pressure, 0.4 is probably as high as it can go without'
@@ -75,7 +78,8 @@ def sample_main(args):
         # Restore the saved variables, replacing the initialized values.
         print("Restoring weights...")
         saver.restore(sess, model_path)
-        chatbot(net, sess, chars, vocab, args.n, args.beam_width, args.relevance, args.temperature)
+        chatbot(net, sess, chars, vocab, args.n, args.beam_width,
+                args.relevance, args.temperature, args.topn)
 
 def initial_state(net, sess):
     # Return freshly initialized model states.
@@ -95,15 +99,6 @@ def forward_text(net, sess, states, relevance, vocab, prime_text=None):
             else:
                 _, states = net.forward_model(sess, states, vocab[char])
     return states
-
-def scale_prediction(prediction, temperature):
-    if (temperature == 1.0): return prediction # Temperature 1.0 makes no change
-    np.seterr(divide='ignore')
-    scaled_prediction = np.log(prediction) / temperature
-    scaled_prediction = scaled_prediction - np.logaddexp.reduce(scaled_prediction)
-    scaled_prediction = np.exp(scaled_prediction)
-    np.seterr(divide='warn')
-    return scaled_prediction
 
 def sanitize_text(vocab, text): # Strip out characters that are not part of the net's vocab.
     return ''.join(i for i in text if i in vocab)
@@ -125,29 +120,29 @@ def possibly_escaped_char(raw_chars):
                 return backspace_seq + new_seq + "".join([' '] * diff_length) + "".join(['\b'] * diff_length)
     return raw_chars[-1]
 
-def chatbot(net, sess, chars, vocab, max_length, beam_width, relevance, temperature):
+def chatbot(net, sess, chars, vocab, max_length, beam_width, relevance, temperature, topn):
     states = initial_state_with_relevance_masking(net, sess, relevance)
     while True:
         user_input = input('\n> ')
-        user_command_entered, reset, states, relevance, temperature, beam_width = process_user_command(
-            user_input, states, relevance, temperature, beam_width)
+        user_command_entered, reset, states, relevance, temperature, topn, beam_width = process_user_command(
+            user_input, states, relevance, temperature, topn, beam_width)
         if reset: states = initial_state_with_relevance_masking(net, sess, relevance)
-        if user_command_entered: continue
-        states = forward_text(net, sess, states, relevance, vocab, sanitize_text(vocab, "> " + user_input + "\n>"))
-        computer_response_generator = beam_search_generator(sess=sess, net=net,
-            initial_state=copy.deepcopy(states), initial_sample=vocab[' '],
-            early_term_token=vocab['\n'], beam_width=beam_width, forward_model_fn=forward_with_mask,
-            forward_args={'relevance':relevance, 'mask_reset_token':vocab['\n'], 'forbidden_token':vocab['>']},
-            temperature=temperature)
-        out_chars = []
-        for i, char_token in enumerate(computer_response_generator):
-            out_chars.append(chars[char_token])
-            print(possibly_escaped_char(out_chars), end='', flush=True)
-            states = forward_text(net, sess, states, relevance, vocab, chars[char_token])
-            if i >= max_length: break
-        states = forward_text(net, sess, states, relevance, vocab, sanitize_text(vocab, "\n> "))
+        if not user_command_entered:
+            states = forward_text(net, sess, states, relevance, vocab, sanitize_text(vocab, "> " + user_input + "\n>"))
+            computer_response_generator = beam_search_generator(sess=sess, net=net,
+                initial_state=copy.deepcopy(states), initial_sample=vocab[' '],
+                early_term_token=vocab['\n'], beam_width=beam_width, forward_model_fn=forward_with_mask,
+                forward_args={'relevance':relevance, 'mask_reset_token':vocab['\n'], 'forbidden_token':vocab['>'],
+                                'temperature':temperature, 'topn':topn})
+            out_chars = []
+            for i, char_token in enumerate(computer_response_generator):
+                out_chars.append(chars[char_token])
+                print(possibly_escaped_char(out_chars), end='', flush=True)
+                states = forward_text(net, sess, states, relevance, vocab, chars[char_token])
+                if i >= max_length: break
+            states = forward_text(net, sess, states, relevance, vocab, sanitize_text(vocab, "\n> "))
 
-def process_user_command(user_input, states, relevance, temperature, beam_width):
+def process_user_command(user_input, states, relevance, temperature, topn, beam_width):
     user_command_entered = False
     reset = False
     try:
@@ -164,6 +159,10 @@ def process_user_command(user_input, states, relevance, temperature, beam_width)
                 states = states[0]
             relevance = new_relevance
             print("[Relevance disabled]" if relevance <= 0. else "[Relevance set to {}]".format(relevance))
+        elif user_input.startswith('--topn '):
+            user_command_entered = True
+            topn = int(user_input[len('--topn '):])
+            print("[Top-n filtering disabled]" if topn <= 0 else "[Top-n filtering set to {}]".format(topn))
         elif user_input.startswith('--beam_width '):
             user_command_entered = True
             beam_width = max(1, int(user_input[len('--beam_width '):]))
@@ -174,7 +173,7 @@ def process_user_command(user_input, states, relevance, temperature, beam_width)
             print("[Model state reset]")
     except ValueError:
         print("[Value error with provided argument.]")
-    return user_command_entered, reset, states, relevance, temperature, beam_width
+    return user_command_entered, reset, states, relevance, temperature, topn, beam_width
 
 def consensus_length(beam_outputs, early_term_token):
     for l in range(len(beam_outputs[0])):
@@ -184,30 +183,50 @@ def consensus_length(beam_outputs, early_term_token):
             if beam_outputs[0][l] != b[l]: return l, False
     return l, False
 
+def scale_prediction(prediction, temperature):
+    if (temperature == 1.0): return prediction # Temperature 1.0 makes no change
+    np.seterr(divide='ignore')
+    scaled_prediction = np.log(prediction) / temperature
+    scaled_prediction = scaled_prediction - np.logaddexp.reduce(scaled_prediction)
+    scaled_prediction = np.exp(scaled_prediction)
+    np.seterr(divide='warn')
+    return scaled_prediction
+
 def forward_with_mask(sess, net, states, input_sample, forward_args):
-    # forward_args is a dictionary containing relevance, mask_reset_token, forbidden_token.
+    # forward_args is a dictionary containing arguments for generating probabilities.
     relevance = forward_args['relevance']
     mask_reset_token = forward_args['mask_reset_token']
     forbidden_token = forward_args['forbidden_token']
+    temperature = forward_args['temperature']
+    topn = forward_args['topn']
+
     if relevance <= 0.:
         # No relevance masking.
         prob, states = net.forward_model(sess, states, input_sample)
-        prob[forbidden_token] = 0
-        return prob / sum(prob), states
-    # states should be a 2-length list: [primary net state, mask net state].
-    if input_sample == mask_reset_token:
-        # Reset the mask probs when reaching mask_reset_token (newline).
-        states[1] = initial_state(net, sess)
-    primary_prob, states[0] = net.forward_model(sess, states[0], input_sample)
-    primary_prob /= sum(primary_prob)
-    mask_prob, states[1] = net.forward_model(sess, states[1], input_sample)
-    mask_prob /= sum(mask_prob)
-    combined_prob = np.exp(np.log(primary_prob) - relevance * np.log(mask_prob))
+    else:
+        # states should be a 2-length list: [primary net state, mask net state].
+        if input_sample == mask_reset_token:
+            # Reset the mask probs when reaching mask_reset_token (newline).
+            states[1] = initial_state(net, sess)
+        primary_prob, states[0] = net.forward_model(sess, states[0], input_sample)
+        primary_prob /= sum(primary_prob)
+        mask_prob, states[1] = net.forward_model(sess, states[1], input_sample)
+        mask_prob /= sum(mask_prob)
+        prob = np.exp(np.log(primary_prob) - relevance * np.log(mask_prob))
+    # Mask out the forbidden token (">") to prevent the bot from deciding the chat is over)
+    prob[forbidden_token] = 0
     # Normalize probabilities so they sum to 1.
-    return combined_prob / sum(combined_prob), states
+    prob = prob / sum(prob)
+    # Apply temperature.
+    prob = scale_prediction(prob, temperature)
+    # Apply top-n filtering if enabled
+    if topn > 0:
+        prob[np.argsort(prob)[:-topn]] = 0
+        prob = prob / sum(prob)
+    return prob, states
 
 def beam_search_generator(sess, net, initial_state, initial_sample,
-    early_term_token, beam_width, forward_model_fn, forward_args, temperature):
+    early_term_token, beam_width, forward_model_fn, forward_args):
     '''Run beam search! Yield consensus tokens sequentially, as a generator;
     return when reaching early_term_token (newline).
 
@@ -224,8 +243,6 @@ def beam_search_generator(sess, net, initial_state, initial_sample,
             probability_output, beam_state =
                     forward_model_fn(sess, net, beam_state, beam_sample, forward_args)
             (Note: probability_output has to be a valid probability distribution!)
-        temperature: how conservatively to sample tokens from each distribution
-            (1.0 = neutral, lower means more conservative)
         tot_steps: how many tokens to generate before stopping,
             unless already stopped via early_term_token.
     Returns: a generator to yield a sequence of beam-sampled tokens.'''
@@ -253,7 +270,6 @@ def beam_search_generator(sess, net, initial_state, initial_sample,
             # Forward the model.
             prediction, beam_states[beam_index] = forward_model_fn(
                     sess, net, beam_state, beam_sample, forward_args)
-            prediction = scale_prediction(prediction, temperature)
 
             # Sample best_tokens from the probability distribution.
             # Sample from the scaled probability distribution beam_width choices
