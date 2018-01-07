@@ -20,7 +20,7 @@ def main():
 	parser.add_argument('--comment_cache_size', type=int, default=1e7,
 					   help='max number of comments to cache in memory before flushing')
 	parser.add_argument('--output_file_size', type=int, default=2e8,
-					   help='max number of comments to cache in memory before flushing')
+					   help='max size of each output file (give or take one conversation)')
 	parser.add_argument('--print_every', type=int, default=1000,
 					   help='print an update to the screen this often')
 	parser.add_argument('--min_conversation_length', type=int, default=5,
@@ -75,9 +75,25 @@ def parse_main(args):
 		os.makedirs(args.logdir)
 	subreddit_dict = {}
 	comment_dict = {}
-	cache_count = 0
 	raw_data = raw_data_generator(args.input_file)
 	output_handler = OutputHandler(os.path.join(args.logdir, OUTPUT_FILE), args.output_file_size)
+	done = False
+	total_read = 0
+	while not done:
+		done, i = read_comments_into_cache(raw_data, comment_dict, args.print_every, args.print_subreddit,
+			args.comment_cache_size, subreddit_dict, substring_blacklist, subreddit_whitelist, substring_blacklist)
+		total_read += i
+		process_comment_cache(comment_dict, args.print_every)
+		write_comment_cache(comment_dict, output_handler, args.print_every,
+							args.print_subreddit, args.min_conversation_length)
+		write_report(os.path.join(args.logdir, REPORT_FILE), subreddit_dict)
+		comment_dict.clear()
+	print("\nRead all {:,d} lines from {}.".format(total_read, args.input_file))
+
+def read_comments_into_cache(raw_data, comment_dict, print_every, print_subreddit, comment_cache_size,
+			subreddit_dict, subreddit_blacklist, subreddit_whitelist, substring_blacklist):
+	done = False
+	cache_count = 0
 	for i, line in enumerate(raw_data):
 		# Ignore certain kinds of malformed JSON
 		if len(line) > 1 and (line[-1] == '}' or line[-2] == '}'):
@@ -88,23 +104,16 @@ def parse_main(args):
 				if sub in subreddit_dict:
 					subreddit_dict[sub] += 1
 				else: subreddit_dict[sub] = 1
-				comment_dict[comment['id']] = RedditComment(comment, args.print_subreddit)
+				comment_dict[comment['id']] = RedditComment(comment, print_subreddit)
 				cache_count += 1
-				if cache_count % args.print_every == 0:
+				if cache_count % print_every == 0:
 					print("\rCached {:,d} comments".format(cache_count), end='')
 					sys.stdout.flush()
-				if cache_count > args.comment_cache_size:
-					print()
-					process_comment_cache(comment_dict, args.print_every)
-					write_comment_cache(comment_dict, output_handler, args.print_every,
-										args.print_subreddit, args.min_conversation_length)
-					write_report(os.path.join(args.logdir, REPORT_FILE), subreddit_dict)
-					comment_dict.clear()
-					cache_count = 0
-	print("\nRead all {:,d} lines from {}.".format(i, args.input_file))
-	process_comment_cache(comment_dict, args.print_every)
-	write_comment_cache(comment_dict, output_handler, args.print_every, args.print_subreddit)
-	write_report(os.path.join(args.logdir, REPORT_FILE), subreddit_dict)
+				if cache_count > comment_cache_size: break
+	else: # raw_data has been exhausted.
+		done = True
+	print()
+	return done, i
 
 def raw_data_generator(path):
 	if os.path.isdir(path):
@@ -164,7 +173,7 @@ def post_qualifies(json_object, subreddit_blacklist,
 		for substring in substring_blacklist:
 			if body.find(substring) >= 0: return False
 	# Preprocess the comment text.
-	body = re.sub('[ \t\n]+', ' ', body) # Replace runs of whitespace with a single space.
+	body = re.sub('[ \t\n\r]+', ' ', body) # Replace runs of whitespace with a single space.
 	body = re.sub('\^', '', body) # Strip out carets.
 	body = re.sub('\\\\', '', body) # Strip out backslashes.
 	body = re.sub('&lt;', '<', body) # Replace '&lt;' with '<'
