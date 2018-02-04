@@ -10,6 +10,9 @@ OUTPUT_FILE = "output.bz2"
 REPORT_FILE = "RC_report.txt"
 
 def main():
+	assert sys.version_info >= (3, 3), \
+    "Must be run in Python 3.3 or later. You are running {}".format(sys.version)
+    
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--input_file', type=str, default='reddit_data',
 					   help='data file or directory containing bz2 archive of json reddit data')

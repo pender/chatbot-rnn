@@ -5,11 +5,15 @@ import argparse
 import time, datetime
 import os
 import pickle
+import sys
 
 from utils import TextLoader
 from model import Model
 
 def main():
+    assert sys.version_info >= (3, 3), \
+    "Must be run in Python 3.3 or later. You are running {}".format(sys.version)
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str, default='data/scotus',
                        help='data directory containing input.txt')

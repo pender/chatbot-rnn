@@ -14,6 +14,10 @@ from utils import TextLoader
 from model import Model
 
 def main():
+    assert sys.version_info >= (3, 3), \
+    "Must be run in Python 3.3 or later. You are running {}".format(sys.version)
+    
+    raise "Must be using Python 3"
     parser = argparse.ArgumentParser()
     parser.add_argument('--save_dir', type=str, default='models/reddit',
                        help='model directory to store checkpointed models')
