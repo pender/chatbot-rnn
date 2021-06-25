@@ -1,9 +1,11 @@
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+import tensorflow_addons as tfa
 from tensorflow.python.ops import rnn_cell
 from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.framework import ops
-from tensorflow.contrib import rnn
+
 
 from tensorflow.python.util.nest import flatten
 
@@ -93,11 +95,11 @@ def _rnn_state_placeholders(state):
     """Convert RNN state tensors to placeholders, reflecting the same nested tuple structure."""
     # Adapted from @carlthome's comment:
     # https://github.com/tensorflow/tensorflow/issues/2838#issuecomment-302019188
-    if isinstance(state, tf.contrib.rnn.LSTMStateTuple):
+    if isinstance(state, tf.compat.v1.nn.rnn_cell.LSTMStateTuple):
         c, h = state
         c = tf.placeholder(c.dtype, c.shape, c.op.name)
         h = tf.placeholder(h.dtype, h.shape, h.op.name)
-        return tf.contrib.rnn.LSTMStateTuple(c, h)
+        return tf.compat.v1.nn.rnn_cell.LSTMStateTuple(c, h)
     elif isinstance(state, tf.Tensor):
         h = state
         h = tf.placeholder(h.dtype, h.shape, h.op.name)
@@ -122,7 +124,7 @@ class Model():
         elif args.model == 'lstm':
             cell_fn = rnn_cell.BasicLSTMCell
         elif args.model == 'nas':
-            cell_fn = rnn.NASCell
+            cell_fn = tfa.rnn.NASCell
         else:
             raise Exception("model type not supported: {}".format(args.model))
 
