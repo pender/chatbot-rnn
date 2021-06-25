@@ -1,5 +1,5 @@
 # chatbot-rnn
-A toy chatbot powered by deep learning and trained on data from Reddit. Built on TensorFlow v1.4.0 and Python v3.5.1.
+A toy chatbot powered by deep learning and trained on data from Reddit. Built for TensorFlow v2.x and Python >= v3.5.1.
 
 Here is a sample chat transcript (not cherry-picked). Lines that start with ">" are me; the lines without ">" are the chatbot's responses.
 
@@ -41,6 +41,11 @@ Restoring weights...
 - **Install [TensorFlow](http://www.tensorflow.org/)** for Python 3. To run a pretrained model, the CPU-only installation should suffice. If you want to train your own models, you'll need the GPU installation of TensorFlow (and a powerful CUDA-compatible GPU).
 
 - Clone this project to your computer.
+
+- Install `tensorflow_addons`:
+```
+pip install tensorflow-addons
+```
 
 ### Run my pre-trained model
 
